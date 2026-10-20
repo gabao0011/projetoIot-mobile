@@ -1,49 +1,93 @@
-import { Sensor } from '../types/sensor';
+import { api, ApiError, normalizeError } from './api';
+import {
+  Sensor,
+  SensorDetailsResponse,
+  SensorListResponse,
+  SensorUpdateRequest,
+  SensorUpdateResponse,
+} from '../types/sensor';
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+export async function listSensors(): Promise<Sensor[]> {
+  try {
+    const { data } = await api.get<SensorListResponse>(
+      '/api/sensor/status/listar'
+    );
+    if (!isObject(data) || !Array.isArray((data as any).data)) {
+      throw new ApiError('Resposta inválida ao listar sensores.');
+    }
+    return (data as SensorListResponse).data.filter(
+      (s): s is Sensor =>
+        isObject(s) && typeof (s as any).codigo === 'string'
+    );
+  } catch (err) {
+    throw normalizeError(err);
+  }
+}
+
+export async function getSensorByCode(
+  codigo: string
+): Promise<SensorDetailsResponse> {
+  if (!codigo || !codigo.trim()) {
+    throw new ApiError('Informe o código do sensor.');
+  }
+  try {
+    const { data } = await api.get<SensorDetailsResponse>(
+      `/api/sensor/status/visualizar/${encodeURIComponent(codigo.trim())}`
+    );
+    if (!isObject(data) || typeof (data as any).status !== 'number') {
+      throw new ApiError('Resposta inesperada ao consultar o sensor.');
+    }
+    return data as SensorDetailsResponse;
+  } catch (err) {
+    throw normalizeError(err);
+  }
+}
 
 export interface UpdateResult {
   confirmed: boolean;
   message: string;
 }
 
-// ⚠️ MODO DEMONSTRAÇÃO — dados fictícios apenas para visualização.
-// Para voltar ao backend real, restaure a versão original.
+export async function updateSensorStatus(
+  payload: SensorUpdateRequest
+): Promise<UpdateResult> {
+  try {
+    const { data } = await api.put<SensorUpdateResponse>(
+      '/api/sensor/status/atualizar',
+      payload
+    );
 
-const MOCK_SENSORS: Sensor[] = [
-  { codigo: 'SENSOR001', tipo: 'temperatura', status: 1 },
-  { codigo: 'SENSOR002', tipo: 'umidade', status: 0 },
-  { codigo: 'SENSOR003', tipo: 'pressao', status: 1 },
-  { codigo: 'SENSOR004', tipo: 'luminosidade', status: 0 },
-  { codigo: 'SENSOR005', tipo: 'temperatura', status: 1 },
-  { codigo: 'SENSOR006', tipo: 'umidade', status: 2 }, // status desconhecido, só pra mostrar o badge cinza
-];
+    if (!isObject(data)) {
+      return {
+        confirmed: false,
+        message: 'Resposta não reconhecida. Reconsulte o sensor.',
+      };
+    }
 
-export async function listSensors(): Promise<Sensor[]> {
-  await new Promise((r) => setTimeout(r, 600)); // simula delay de rede
-  return MOCK_SENSORS;
-}
+    const d = data as SensorUpdateResponse;
 
-export async function getSensorByCode(codigo: string) {
-  await new Promise((r) => setTimeout(r, 500));
-  const found = MOCK_SENSORS.find(
-    (s) => s.codigo.toLowerCase() === codigo.toLowerCase()
-  );
-  if (!found) {
-    throw new Error('sensor não encontrado');
+    if (typeof d.error === 'string' && d.error.trim()) {
+      return { confirmed: false, message: d.error };
+    }
+
+    if (typeof d.status === 'number' && d.status === payload.status) {
+      return {
+        confirmed: true,
+        message: d.message?.trim() || 'Status atualizado com sucesso.',
+      };
+    }
+
+    return {
+      confirmed: false,
+      message:
+        d.message?.trim() ||
+        'Não foi possível confirmar a atualização. Reconsulte o sensor.',
+    };
+  } catch (err) {
+    throw normalizeError(err);
   }
-  return { success: 'Registro encontrado com sucesso', status: found.status };
-}
-
-export async function updateSensorStatus(payload: {
-  codigo: string;
-  status: 0 | 1;
-}): Promise<UpdateResult> {
-  await new Promise((r) => setTimeout(r, 700));
-  const idx = MOCK_SENSORS.findIndex((s) => s.codigo === payload.codigo);
-  if (idx >= 0) {
-    MOCK_SENSORS[idx] = { ...MOCK_SENSORS[idx], status: payload.status };
-  }
-  return {
-    confirmed: true,
-    message: `Sensor ${payload.codigo} atualizado para status ${payload.status}.`,
-  };
 }
